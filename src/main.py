@@ -1,6 +1,7 @@
 import boto3
 import ffmpeg
 import os
+import flet as ft
 
 def encode_video(input_file, output_file, video_codec, audio_codec, crf, audio_bitrate):
     try:
@@ -39,14 +40,43 @@ def scan_for_and_upload_videos(input_directory, output_directory, output_format,
                 if encode_video(input_file_path, temp_file_path, video_codec, audio_codec, crf, audio_bitrate):
                     s3.upload_file(temp_file_path, 'hackingerror404-bucket', aws_output)
                     os.remove(temp_file_path)
+    print(f"Video Uploads Complete!")
 
-input_directory = "vidsInput"
-output_directory = "vidsOutput/" # NEEDS TO END IN A '/' TO WORK.
-output_format = "mp4"
-video_codec = "libx264"
-crf = 23
-audio_bitrate = '128k'
+def main(page: ft.Page):
+    def button_clicked(e: ft.Event[ft.Button]):
+        # button.data += 1
+        message.value = f"Script Activated"
+        scan_for_and_upload_videos(input_directory, output_directory, output_format, video_codec, "dummy", crf, audio_bitrate, s3)
+        
+    page.title = "Encode an' Cloud"
+    page.window_width = 500
+    page.window_height = 500
+    page.resizable = True
+    page.padding = 20
+    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
 
-s3 = boto3.client('s3')
+    input_directory = "vidsInput"
+    output_directory = "vidsOutput/" # NEEDS TO END IN A '/' TO WORK.
+    output_format = "mp4"
+    video_codec = "libx264"
+    crf = 23
+    audio_bitrate = '128k'
 
-scan_for_and_upload_videos(input_directory, output_directory, output_format, video_codec, "dummy", crf, audio_bitrate, s3)
+    s3 = boto3.client('s3')
+
+    page.add(
+        ft.SafeArea(
+            content=ft.Column(
+                controls=[
+                    button := ft.Button(
+                        content="click me to run the script :D",
+                        data=0,
+                        on_click=button_clicked
+                    ),
+                    message := ft.Text("Script Began."),
+                ]
+            )
+        ),
+    )
+
+ft.run(main)
