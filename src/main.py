@@ -1,62 +1,56 @@
 import boto3
 import ffmpeg
-import os
 import flet as ft
+import os
+import queue
+import subprocess
+import threading
 
-def encode_video(input_file, output_file, video_codec, audio_codec, crf, audio_bitrate):
-    try:
-        stream = ffmpeg.input(input_file)
-        stream = ffmpeg.output(
-            stream,
-            output_file,
-            vcodec=video_codec,
-            acodec="copy",
-            crf=crf,
-            **{'b:a': audio_bitrate} # controls the audio bitrate.
-            # **{"q:v": 1} # controls video quality. smaller num = higher quality
-        )
-        ffmpeg.run(stream)
-        print(f"Video converted successfully to {output_file}")
-        return True
-    except ffmpeg.Error as e:
-        print("Error converting video.")
-        print(e.stderr.decode() if e.stderr else str(e))
-        return False
+def run_ffmpeg_encode(input_path, output_path, video_codec, crf, audio_bitrate):
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", input_path,
+        "-c:v", video_codec,
+        "-crf", str(crf),
+        "-c:a", "copy",
+        "-b:a", audio_bitrate,
+        output_path
+    ]
+    # WHYYYYYY do i have to use a subprocess whyyyyy
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return proc.returncode == 0, proc.stdout, proc.stderr
 
-def scan_for_and_upload_videos(input_directory, output_directory, output_format, video_codec, audio_codec, crf, audio_bitrate, s3):
-    # scan videos in directory
-    for root, dirs, files in os.walk(input_directory):
+def scan_videos(input_directory, allowed_exts=None):
+    if allowed_exts is None:
+        allowed_exts = {".mp4", ".mov", ".mkv", ".avi"} # TODO: update with full list of ffmpeg compatability? or say 'fuck it' and let it handle everything regardless of error possibility.
+    videos = []
+    for root, _, files in os.walk(input_directory):
         for f in files:
-            input_file_path = os.path.join(root, f)
-
-            if os.path.isfile(input_file_path):
-
-                new_output = f[:f.index(".")] + "." + output_format
-                aws_output = output_directory + new_output
-                
-                temp_output = f[:f.index(".")] + "_temp." + output_format
-                temp_file_path = os.path.join(input_directory, temp_output)
-
-                if encode_video(input_file_path, temp_file_path, video_codec, audio_codec, crf, audio_bitrate):
-                    s3.upload_file(temp_file_path, 'hackingerror404-bucket', aws_output)
-                    os.remove(temp_file_path)
-    print(f"Video Uploads Complete!")
+            ext = os.path.splitext(f)[1].lower()
+            if ext in allowed_exts:
+                videos.append(os.path.join(root, f))
+    return sorted(videos)
 
 def main(page: ft.Page):
-    def button_clicked(e: ft.Event[ft.Button]):
-        # button.data += 1
-        message.value = f"Script Activated"
-        scan_for_and_upload_videos(input_directory, output_directory, output_format, video_codec, "dummy", crf, audio_bitrate, s3)
-        
-    page.title = "Encode an' Cloud"
+    ui_thread_queue = queue.Queue()
+
+    page.title = "Encode & Upload"
     page.window_width = 500
     page.window_height = 500
     page.resizable = True
-    page.padding = 20
+    page.padding = 16
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
 
-    input_directory = "vidsInput"
-    output_directory = "vidsOutput/" # NEEDS TO END IN A '/' TO WORK.
+    input_directory = ft.TextField(label="Local Video Path")
+    output_directory = ft.TextField(label="Cloud Output Path")
+    # log_field = ft.TextField(label="Console Output", multiline=True, read_only=True, expand=True)
+    start_btn = ft.Button(content="Start", width=160)
+    status_label = ft.Text("", size=14)
+    progress_bar = ft.ProgressBar(width=600, height=12, bgcolor=ft.Colors.GREY_200)
+    progress_text = ft.Text("0 / 0", size=12)
+
+    # TODO: convert these to fields the user can edit at will. use dropdowns / slider / typed in.
     output_format = "mp4"
     video_codec = "libx264"
     crf = 23
@@ -64,19 +58,92 @@ def main(page: ft.Page):
 
     s3 = boto3.client('s3')
 
+    def update_ui(status_text=None, task_counter=None, total_tasks=None):
+        if status_text is not None:
+            status_label.value = status_text
+        if task_counter is not None and total_tasks is not None:
+            progress_bar.value = (task_counter / total_tasks) if total_tasks > 0 else 0.0
+            progress_text.value = f"{task_counter} / {total_tasks}"
+        page.update()
+
+    def encode_and_upload(input_path: str, output_path: str, output_format: str, video_codec: str, crf: str, audio_bitrate: str):
+        video_list = scan_videos(input_path)
+        num = len(video_list)
+        if num == 0:
+            update_ui(status_text="No videos found.")
+            start_btn.disabled = False
+            page.update() # TODO: consider swapping above ^ order so update() isn't called twice in a row?
+            return
+
+        total_tasks = num * 2
+        task_counter = 0
+        update_ui(status_text="Starting...", task_counter=task_counter, total_tasks=total_tasks)
+
+        for vid_counter, vid_path in enumerate(video_list, start=1):
+            filename_base = os.path.splitext(os.path.basename(vid_path))[0]
+            temp_output = os.path.join(input_path, f"{filename_base}_temp." + output_format)
+            aws_output = (output_path.rstrip("/") + "/" + filename_base + "." + output_format).lstrip("/")
+
+            # ENCODE STEP!
+            update_ui(status_text=f"Encoding {filename_base} ({vid_counter}/{num})")
+            encode_success, _, _ = run_ffmpeg_encode(vid_path, temp_output, video_codec, crf, audio_bitrate)
+            task_counter += 1
+            update_ui(task_counter=task_counter, total_tasks=total_tasks)
+
+            if not encode_success:
+                update_ui(status_text=f"Encoding failed: {filename_base} — skipping file")
+                continue
+
+            update_ui(task_counter=task_counter, total_tasks=total_tasks)
+
+            # UPLOAD STEP!
+            update_ui(status_text=f"Uploading {filename_base} ({vid_counter}/{num})")
+            try:
+                s3.upload_file(temp_output, "hackingerror404-bucket", aws_output)
+                update_ui(status_text=f"Uploaded {filename_base}")
+            except Exception as e:
+                    update_ui(status_text=f"Upload failed: {filename_base} - skipping upload")            
+            finally:
+                try:
+                    os.remove(temp_output)
+                except Exception:
+                    pass
+
+            task_counter += 1
+            update_ui(task_counter=task_counter, total_tasks=total_tasks)
+
+        update_ui(status_text="All videos complete.")
+        start_btn.disabled = False
+        page.update()
+
+    def on_start(e):
+        if not input_directory.value:
+            update_ui(status_text="Please provide a local video path.")
+            return
+        if not output_directory.value:
+            update_ui(status_text="Please provide a cloud output prefix.")
+            return
+
+        start_btn.disabled = True
+        progress_bar.visible = True
+        update_ui(status_text="Preparing...", task_counter=0, total_tasks=1)
+
+        threading.Thread(target=encode_and_upload, args=(input_directory.value, output_directory.value, output_format, video_codec, crf, audio_bitrate), daemon=True).start()
+
+    start_btn.on_click = on_start
+    progress_bar.value = 0.0    
+    progress_bar.visible = False
+
     page.add(
-        ft.SafeArea(
-            content=ft.Column(
-                controls=[
-                    button := ft.Button(
-                        content="click me to run the script :D",
-                        data=0,
-                        on_click=button_clicked
-                    ),
-                    message := ft.Text("Script Began."),
-                ]
-            )
-        ),
+        ft.Column([
+            input_directory,
+            output_directory,
+            ft.Row([start_btn, ft.Container(width=12), progress_text]),
+            ft.Container(height=8),
+            progress_bar,
+            ft.Container(height=12),
+            status_label
+        ])
     )
 
 ft.run(main)
