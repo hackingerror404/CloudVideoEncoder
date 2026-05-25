@@ -6,7 +6,7 @@ import queue
 import subprocess
 import threading
 
-def run_ffmpeg_encode(input_path, output_path, video_codec, crf, audio_bitrate):
+def run_ffmpeg_encode(input_path, output_path, video_codec, crf):
     cmd = [
         "ffmpeg",
         "-y",
@@ -14,7 +14,6 @@ def run_ffmpeg_encode(input_path, output_path, video_codec, crf, audio_bitrate):
         "-c:v", video_codec,
         "-crf", str(crf),
         "-c:a", "copy",
-        "-b:a", audio_bitrate,
         output_path
     ]
     # WHYYYYYY do i have to use a subprocess whyyyyy
@@ -23,7 +22,7 @@ def run_ffmpeg_encode(input_path, output_path, video_codec, crf, audio_bitrate):
 
 def scan_videos(input_directory, allowed_exts=None):
     if allowed_exts is None:
-        allowed_exts = {".mp4", ".mov", ".mkv", ".avi"} # TODO: update with full list of ffmpeg compatability? or say 'fuck it' and let it handle everything regardless of error possibility.
+        allowed_exts = {".mp4", ".mov", ".mkv", ".avi", ".gif"}
     videos = []
     for root, _, files in os.walk(input_directory):
         for f in files:
@@ -44,18 +43,29 @@ def main(page: ft.Page):
 
     input_directory = ft.TextField(label="Local Video Path")
     output_directory = ft.TextField(label="Cloud Output Path")
+    output_format = ft.Dropdown(
+        label="Output Video Format",
+        editable=True,
+        options=[
+            ft.DropdownOption(key="avi", text=".avi"),
+            ft.DropdownOption(key="gif", text=".gif"),
+            ft.DropdownOption(key="mkv", text=".mkv"),
+            ft.DropdownOption(key="mov", text=".mov"),
+            ft.DropdownOption(key="mp4", text=".mp4")
+        ]
+    )
+    crf_slider = ft.Slider(min=17, max=47, divisions=30, label="crf = {value}")
+    crf_slider.value = 23
+    crf_slider_text = ft.Text("Compression Rate; higher value = more compressed.")
+
     # log_field = ft.TextField(label="Console Output", multiline=True, read_only=True, expand=True)
     start_btn = ft.Button(content="Start", width=160)
     status_label = ft.Text("", size=14)
     progress_bar = ft.ProgressBar(width=600, height=12, bgcolor=ft.Colors.GREY_200)
-    progress_text = ft.Text("0 / 0", size=12)
+    progress_text = ft.Text("Tasks Remaining: 0 / 0", size=12)
+    progress_ring = ft.ProgressRing()
 
-    # TODO: convert these to fields the user can edit at will. use dropdowns / slider / typed in.
-    output_format = "mp4"
     video_codec = "libx264"
-    crf = 23
-    audio_bitrate = '128k'
-
     s3 = boto3.client('s3')
 
     def update_ui(status_text=None, task_counter=None, total_tasks=None):
@@ -63,10 +73,10 @@ def main(page: ft.Page):
             status_label.value = status_text
         if task_counter is not None and total_tasks is not None:
             progress_bar.value = (task_counter / total_tasks) if total_tasks > 0 else 0.0
-            progress_text.value = f"{task_counter} / {total_tasks}"
+            progress_text.value = f"Tasks Remaining: {task_counter} / {total_tasks}"
         page.update()
 
-    def encode_and_upload(input_path: str, output_path: str, output_format: str, video_codec: str, crf: str, audio_bitrate: str):
+    def encode_and_upload(input_path: str, output_path: str, output_format: str, video_codec: str, crf: str):
         video_list = scan_videos(input_path)
         num = len(video_list)
         if num == 0:
@@ -86,7 +96,7 @@ def main(page: ft.Page):
 
             # ENCODE STEP!
             update_ui(status_text=f"Encoding {filename_base} ({vid_counter}/{num})")
-            encode_success, _, _ = run_ffmpeg_encode(vid_path, temp_output, video_codec, crf, audio_bitrate)
+            encode_success, _, _ = run_ffmpeg_encode(vid_path, temp_output, video_codec, crf)
             task_counter += 1
             update_ui(task_counter=task_counter, total_tasks=total_tasks)
 
@@ -114,6 +124,7 @@ def main(page: ft.Page):
 
         update_ui(status_text="All videos complete.")
         start_btn.disabled = False
+        progress_ring.visible = False
         page.update()
 
     def on_start(e):
@@ -123,24 +134,31 @@ def main(page: ft.Page):
         if not output_directory.value:
             update_ui(status_text="Please provide a cloud output prefix.")
             return
+        if not output_format.value:
+            update_ui(status_text="Please provide an output video format.")
+            return
 
         start_btn.disabled = True
         progress_bar.visible = True
+        progress_ring.visible = True
         update_ui(status_text="Preparing...", task_counter=0, total_tasks=1)
 
-        threading.Thread(target=encode_and_upload, args=(input_directory.value, output_directory.value, output_format, video_codec, crf, audio_bitrate), daemon=True).start()
+        threading.Thread(target=encode_and_upload, args=(input_directory.value, output_directory.value, output_format.value, video_codec, crf_slider.value), daemon=True).start()
 
     start_btn.on_click = on_start
     progress_bar.value = 0.0    
     progress_bar.visible = False
+    progress_ring.visible = False
 
     page.add(
         ft.Column([
             input_directory,
             output_directory,
+            output_format,
+            ft.Row([crf_slider, ft.Container(width=4), crf_slider_text]),
             ft.Row([start_btn, ft.Container(width=12), progress_text]),
             ft.Container(height=8),
-            progress_bar,
+            ft.Row([progress_bar, ft.Container(width=4), progress_ring]),
             ft.Container(height=12),
             status_label
         ])

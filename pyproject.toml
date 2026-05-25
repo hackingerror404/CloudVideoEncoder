@@ -8,7 +8,9 @@ authors = [
     { name = "Flet developer", email = "you@example.com" }
 ]
 dependencies = [
-    "flet>=0.85.1"
+    "boto3>=1.43.14",
+    "ffmpeg-python>=0.2.0",
+    "flet>=0.85.1",
 ]
 
 [dependency-groups]
