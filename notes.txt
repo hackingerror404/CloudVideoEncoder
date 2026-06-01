@@ -1,6 +1,0 @@
-What I Need for the project:
-- styling
-- show console output for ffmpeg, s3 output??
-- GUI freezes/lags.
-- easy s3 amazon login/logout for the user
-- publish as an actual app you can download
