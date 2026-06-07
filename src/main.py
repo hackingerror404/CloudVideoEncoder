@@ -34,8 +34,8 @@ def scan_videos(input_directory, allowed_exts=None):
     for root, _, files in os.walk(input_directory):
         for f in files:
             ext = os.path.splitext(f)[1].lower()
-            if ext in allowed_exts:
-                videos.append(os.path.join(root, f))
+            # if ext in allowed_exts:
+            videos.append(os.path.join(root, f))
     return sorted(videos)
 
 async def main(page: ft.Page):
