@@ -28,8 +28,8 @@ def run_ffmpeg_encode(input_path, output_path, video_codec, crf):
         return False
 
 def scan_videos(input_directory, allowed_exts=None):
-    if allowed_exts is None:
-        allowed_exts = {".mp4", ".mov", ".mkv", ".avi", ".gif"}
+    #if allowed_exts is None:
+    #    allowed_exts = {".mp4", ".mov", ".mkv", ".avi", ".gif"}
     videos = []
     for root, _, files in os.walk(input_directory):
         for f in files:
