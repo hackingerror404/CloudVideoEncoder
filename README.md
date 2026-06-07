@@ -11,7 +11,7 @@ AWS Secret Keys will be necessary to use the app and provided in the settings. (
 <br></br>
 
 ### TO INSTALL:
-The app is packed in a .tar.gz file, please use the release linked [here](https://github.com/hackingerror404/CloudVideoEncoder/releases/tag/v1.0).
+The app is packed in a .tar.gz file, please use the release linked [here](https://github.com/hackingerror404/CloudVideoEncoder/releases/tag/v1.0.1).
 
 ### Dependencies/Technologies Used:
 - Python 3.14
