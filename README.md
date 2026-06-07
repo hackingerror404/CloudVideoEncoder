@@ -20,4 +20,4 @@ The app is packed in a .tar.gz file, please use the release linked [here](https:
 - [Amazon Boto3](https://docs.aws.amazon.com/boto3/latest/)
 
 ### Demonstration Of the App in Use!
-FILL THIS WHEN VIDEO READY.
+Link [here](https://youtu.be/u0LHTt5oqNo).
